@@ -1,0 +1,991 @@
+<html>
+
+<head>
+    <style>
+        body {
+            font-family: 'Hiragino Kaku Gothic Pro', 'ヒラギノ角ゴ Pro W3', 'Meiryo', sans-serif;
+            margin: 20px;
+            background-color: #f0f8ff;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 30px;
+        }
+        
+        .controls {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            margin: 0 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        .link {
+            stroke-width: 3;
+            opacity: 0.8;
+        }
+        
+        
+        .node text {
+            pointer-events: none;
+            font: 12px sans-serif;
+            font-weight: bold;
+            fill: white;
+            text-anchor: middle;
+        }
+        
+        .node circle {
+            cursor: pointer;
+            stroke: #2c3e50;
+            stroke-width: 2;
+        }
+        
+        .node circle.male {
+            fill: #3498db;
+        }
+        
+        .node circle.female {
+            fill: #e91e63;
+        }
+        
+        .node:hover circle {
+            stroke-width: 4;
+        }
+        
+        .legend {
+            position: fixed;
+            top: 100px;
+            right: 20px;
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #3498db;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            font-size: 14px;
+            z-index: 1000;
+            max-width: 200px;
+        }
+        
+        .legend h3 {
+            margin: 0 0 15px 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 5px;
+        }
+        
+        .legend-item {
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .legend-line {
+            width: 30px;
+            height: 3px;
+            margin-right: 10px;
+        }
+        
+        .legend-circle {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 10px;
+            border: 2px solid #2c3e50;
+        }
+        
+        .info-panel {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #3498db;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            max-width: 400px;
+            display: none;
+            z-index: 1000;
+        }
+        
+        .info-panel h3 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+        }
+        
+        .info-panel p {
+            margin: 5px 0;
+            line-height: 1.4;
+        }
+        
+        .tooltip {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 5px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 2000;
+            max-width: 250px;
+            word-wrap: break-word;
+            display: none;
+        }
+        
+        #graph {
+            border: 3px solid #3498db;
+            border-radius: 10px;
+            background-color: white;
+            margin: 0 auto;
+            display: block;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #7f8c8d;
+            font-size: 18px;
+        }
+    </style>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <script type="text/javascript" src="jquery.min.js"></script>
+    <script type="text/javascript" src="d3.v3.min.js"></script>
+    <script type="text/javascript" src="osql.js"></script>
+    <script type="text/javascript">
+        osql.requireLogin();
+        
+        let currentPenguinData = null;
+        let currentGroupData = null;
+        let currentGraphData = null;
+        let allRelationshipTypes = [];
+        
+        // 関係の種類をマッピング
+        const relationshipMapping = {
+            '夫婦': 'couple',
+            'カップル': 'couple',
+            '破局': 'breakup',
+            '友達以上？': 'more_than_friends',
+            '友達': 'friend',
+            '不仲': 'conflict'
+        };
+
+        async function execButtonPressed() {
+            try {
+                document.getElementById('loading').style.display = 'block';
+                
+                // ペンギンデータを取得
+                var penguinSql = `
+                    SELECT p.id, p.name, p.gender, p.photo, p.features, p.personality, p.detail_features,
+                           GROUP_CONCAT(DISTINCT a.attribute_name) as attributes
+                    FROM penguins p
+                    LEFT JOIN penguin_attributes pa ON p.id = pa.penguin_id
+                    LEFT JOIN attributes a ON pa.attribute_id = a.id
+                    GROUP BY p.id
+                `;
+                
+                var penguins = await osql.connect(penguinSql);
+                
+                // 関係データを取得
+                var relationshipSql = `
+                    SELECT pr.from_id, pr.to_id, rt.type_name, pr.notes
+                    FROM penguin_relationships pr
+                    JOIN relationship_types rt ON pr.relationship_type_id = rt.id
+                `;
+                
+                var relationships = await osql.connect(relationshipSql);
+                
+                // 家族データを取得
+                var familySql = `
+                    SELECT pf.child_id, pf.parent1_id, pf.parent2_id,
+                           c.name as child_name, p1.name as parent1_name, p2.name as parent2_name
+                    FROM penguin_family pf
+                    JOIN penguins c ON pf.child_id = c.id
+                    JOIN penguins p1 ON pf.parent1_id = p1.id
+                    LEFT JOIN penguins p2 ON pf.parent2_id = p2.id
+                `;
+                
+                var families = await osql.connect(familySql);
+                
+                // グループデータを取得
+                var groupSql = `
+                    SELECT pg.id, pg.group_name,
+                           GROUP_CONCAT(DISTINCT p.id) as member_ids,
+                           GROUP_CONCAT(DISTINCT p.name) as member_names
+                    FROM penguin_groups pg
+                    LEFT JOIN penguin_group_members pgm ON pg.id = pgm.group_id
+                    LEFT JOIN penguins p ON pgm.penguin_id = p.id
+                    GROUP BY pg.id, pg.group_name
+                `;
+                
+                var groups = await osql.connect(groupSql);
+                
+                // 関係性の種類を取得
+                var relationshipTypesSql = `
+                    SELECT DISTINCT type_name FROM relationship_types
+                    ORDER BY type_name
+                `;
+                var relationshipTypesResult = await osql.connect(relationshipTypesSql);
+                allRelationshipTypes = relationshipTypesResult.map(function(rt) { return rt.type_name; });
+                
+                console.log('ペンギン:', penguins.length, '匹');
+                console.log('関係:', relationships.length, '件');
+                console.log('家族:', families.length, '組');
+                console.log('グループ:', groups.length, '個');
+                console.log('関係性の種類:', allRelationshipTypes);
+                
+                // グラフデータを作成
+                var graphdata = { nodes: [], links: [] };
+                var idtable = {};
+                
+                // ペンギンノードを作成
+                penguins.forEach(function (penguin) {
+                    idtable[penguin.id] = graphdata.nodes.length;
+                    
+                    graphdata.nodes.push({
+                        'id': penguin.id,
+                        'name': penguin.name,
+                        'gender': penguin.gender,
+                        'photo': penguin.photo,
+                        'features': penguin.features,
+                        'personality': penguin.personality,
+                        'detail_features': penguin.detail_features,
+                        'attributes': penguin.attributes,
+                        'group': penguin.gender === 'オス' || penguin.gender === '男' ? 'male' : 'female'
+                    });
+                });
+                
+                // 関係リンクを作成（双方向チェック）
+                var processedRelationships = new Set();
+                
+                relationships.forEach(function (relationship) {
+                    var from = idtable[relationship.from_id];
+                    var to = idtable[relationship.to_id];
+                    
+                    if (from !== undefined && to !== undefined) {
+                        var relationshipKey = Math.min(from, to) + '-' + Math.max(from, to) + '-' + relationship.type_name;
+                        
+                        if (!processedRelationships.has(relationshipKey)) {
+                            // 逆方向の関係があるかチェック
+                            var reverseRel = relationships.find(function(rel) {
+                                return rel.from_id === relationship.to_id && 
+                                       rel.to_id === relationship.from_id && 
+                                       rel.type_name === relationship.type_name;
+                            });
+                            
+                            var linkData = {
+                                source: from,
+                                target: to,
+                                type: relationshipMapping[relationship.type_name] || 'friend',
+                                typeName: relationship.type_name,
+                                notes: relationship.notes,
+                                bidirectional: !!reverseRel
+                            };
+                            
+                            graphdata.links.push(linkData);
+                            processedRelationships.add(relationshipKey);
+                            
+                            console.log('関係追加:', relationship.from_id, '->', relationship.to_id, '種類:', relationship.type_name, '双方向:', !!reverseRel);
+                        }
+                    }
+                });
+                
+                // 親子関係のリンクを追加
+                families.forEach(function(family) {
+                    var childIndex = idtable[family.child_id];
+                    var parent1Index = idtable[family.parent1_id];
+                    var parent2Index = family.parent2_id ? idtable[family.parent2_id] : null;
+                    
+                    if (childIndex !== undefined && parent1Index !== undefined) {
+                        graphdata.links.push({
+                            source: parent1Index,
+                            target: childIndex,
+                            type: 'family',
+                            typeName: '親子',
+                            notes: '親子関係',
+                            bidirectional: false
+                        });
+                    }
+                    
+                    if (childIndex !== undefined && parent2Index !== undefined) {
+                        graphdata.links.push({
+                            source: parent2Index,
+                            target: childIndex,
+                            type: 'family',
+                            typeName: '親子',
+                            notes: '親子関係',
+                            bidirectional: false
+                        });
+                    }
+                });
+                
+                currentPenguinData = penguins;
+                currentGroupData = groups;
+                currentGraphData = graphdata;
+                
+                document.getElementById('loading').style.display = 'none';
+                
+                // グラフを描画
+                graphinit(graphdata);
+                
+                // グループ選択UIを初期化
+                initGroupUI();
+                
+                // 関係性フィルタUIを初期化
+                initRelationshipFilterUI();
+                
+            } catch (error) {
+                console.error('データ取得エラー:', error);
+                document.getElementById('loading').innerHTML = 'データの取得に失敗しました。データベースに接続できません。';
+            }
+        }
+
+        // ex/sna.htmlを参考にした描画関数
+        function graphinit(json) {
+            // 既存のSVGを削除
+            d3.select("#graph").selectAll("*").remove();
+            
+            var width = 1200,
+                height = 800;
+
+            var svg = d3.select("#graph").append("svg")
+                .attr("width", width)
+                .attr("height", height);
+
+            var force = d3.layout.force()
+                .gravity(0.05)
+                .distance(150)
+                .charge(-300)
+                .size([width, height]);
+
+            force
+                .nodes(json.nodes)
+                .links(json.links)
+                .start();
+
+            var defs = svg.append("defs");
+            
+            // 関係の種類ごとの色を定義
+            var relationshipColors = {
+                couple: '#e74c3c',
+                breakup: '#e67e22',
+                more_than_friends: '#f39c12',
+                friend: '#2ecc71',
+                conflict: '#9b59b6',
+                family: '#27ae60'
+            };
+            
+            // 各関係タイプごとに右向き矢印マーカーを作成
+            Object.keys(relationshipColors).forEach(function(type) {
+                var marker1 = defs.append('marker')
+                    .attr({
+                        'id': 'arrowhead-' + type,
+                        'viewBox': '0 0 10 10',
+                        'refX': 5,
+                        'refY': 5,
+                        'markerWidth': 8,
+                        'markerHeight': 8,
+                        'orient': 'auto'
+                    });
+                
+                marker1.append('path')
+                    .attr({
+                        'd': 'M0,0 L0,10 L10,5 z',
+                        'fill': relationshipColors[type],
+                        'class': 'marker-' + type
+                    });
+                
+                // 左向き矢印マーカー（双方向用）
+                var marker2 = defs.append('marker')
+                    .attr({
+                        'id': 'arrowhead-reverse-' + type,
+                        'viewBox': '0 0 10 10',
+                        'refX': 5,
+                        'refY': 5,
+                        'markerWidth': 8,
+                        'markerHeight': 8,
+                        'orient': 'auto'
+                    });
+                    
+                marker2.append('path')
+                    .attr({
+                        'd': 'M10,0 L10,10 L0,5 z',
+                        'fill': relationshipColors[type],
+                        'class': 'marker-reverse-' + type
+                    });
+            });
+
+            // ツールチップ要素を作成
+            var tooltip = d3.select("body").append("div")
+                .attr("class", "tooltip");
+
+            // リンクを描画（lineに戻す）
+            var link = svg.selectAll(".link")
+                .data(json.links)
+                .enter().append("line")
+                .attr('stroke', function(d) { 
+                    return relationshipColors[d.type] || '#95a5a6'; 
+                })
+                .attr('stroke-width', function(d) { 
+                    return d.type === 'family' ? 3 : 2; 
+                })
+                .attr('fill', 'none')
+                .attr('stroke-dasharray', function(d) {
+                    var patterns = {
+                        couple: 'none',
+                        breakup: '5,5',
+                        more_than_friends: '10,5',
+                        friend: 'none',
+                        conflict: '8,2',
+                        family: '10,2'
+                    };
+                    return patterns[d.type] || 'none';
+                })
+                .attr('marker-end', function(d) { 
+                    console.log('Setting marker-end for:', d.typeName, 'bidirectional:', d.bidirectional);
+                    return 'url(#arrowhead-' + d.type + ')'; 
+                })
+                .attr('marker-start', function(d) { 
+                    var result = d.bidirectional ? 'url(#arrowhead-reverse-' + d.type + ')' : 'none';
+                    console.log('Setting marker-start for:', d.typeName, 'result:', result);
+                    return result;
+                })
+                .style('opacity', 0.8)
+                .on("mouseover", function(d) {
+                    var relationshipText = d.typeName || d.type;
+                    var notesText = d.notes || '';
+                    var tooltipContent = relationshipText;
+                    
+                    if (notesText && notesText.trim() !== '') {
+                        tooltipContent += '<br><br>' + notesText;
+                    }
+                    
+                    tooltip.html(tooltipContent)
+                        .style("display", "block")
+                        .style("left", (d3.event.pageX + 10) + "px")
+                        .style("top", (d3.event.pageY - 10) + "px");
+                    
+                    // 線を強調表示
+                    d3.select(this)
+                        .attr('stroke-width', function(d) { 
+                            return d.type === 'family' ? 5 : 4; 
+                        })
+                        .style('opacity', 1);
+                })
+                .on("mousemove", function(d) {
+                    tooltip.style("left", (d3.event.pageX + 10) + "px")
+                        .style("top", (d3.event.pageY - 10) + "px");
+                })
+                .on("mouseout", function(d) {
+                    tooltip.style("display", "none");
+                    
+                    // 線を元に戻す
+                    d3.select(this)
+                        .attr('stroke-width', function(d) { 
+                            return d.type === 'family' ? 3 : 2; 
+                        })
+                        .style('opacity', 0.8);
+                });
+
+            // ノードを描画
+            var node = svg.selectAll(".node")
+                .data(json.nodes)
+                .enter().append("g")
+                .attr("class", "node")
+                .call(force.drag)
+                .on("click", function(d) {
+                    showPenguinInfo(d);
+                });
+
+            node.append("circle")
+                .attr("r", 20)
+                .attr("class", function(d) { return d.group; });
+
+            node.append("text")
+                .attr("dy", "0.35em")
+                .text(function(d) { return d.name; });
+
+            force.on("tick", function() {
+                link.attr("x1", function(d) { 
+                        var dx = d.target.x - d.source.x;
+                        var dy = d.target.y - d.source.y;
+                        var length = Math.sqrt(dx * dx + dy * dy);
+                        var nodeRadius = 30; // ノードの半径 + 矢印分のマージン
+                        if (length > 0) {
+                            return d.source.x + (dx / length) * nodeRadius;
+                        }
+                        return d.source.x;
+                    })
+                    .attr("y1", function(d) { 
+                        var dx = d.target.x - d.source.x;
+                        var dy = d.target.y - d.source.y;
+                        var length = Math.sqrt(dx * dx + dy * dy);
+                        var nodeRadius = 30;
+                        if (length > 0) {
+                            return d.source.y + (dy / length) * nodeRadius;
+                        }
+                        return d.source.y;
+                    })
+                    .attr("x2", function(d) { 
+                        var dx = d.target.x - d.source.x;
+                        var dy = d.target.y - d.source.y;
+                        var length = Math.sqrt(dx * dx + dy * dy);
+                        var nodeRadius = 30;
+                        if (length > 0) {
+                            return d.target.x - (dx / length) * nodeRadius;
+                        }
+                        return d.target.x;
+                    })
+                    .attr("y2", function(d) { 
+                        var dx = d.target.x - d.source.x;
+                        var dy = d.target.y - d.source.y;
+                        var length = Math.sqrt(dx * dx + dy * dy);
+                        var nodeRadius = 30;
+                        if (length > 0) {
+                            return d.target.y - (dy / length) * nodeRadius;
+                        }
+                        return d.target.y;
+                    });
+
+                node.attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+            });
+        }
+        
+        function showPenguinInfo(penguin) {
+            var infoPanel = document.getElementById('info-panel');
+            var photoContent = '';
+            
+            // 画像があれば表示
+            if (penguin.photo && penguin.photo.includes('src=')) {
+                var imgMatch = penguin.photo.match(/src="([^"]+)"/);
+                if (imgMatch) {
+                    var imgUrl = imgMatch[1];
+                    photoContent = `<img src="${imgUrl}" style="width: 100%; max-width: 200px; height: auto; border-radius: 10px; margin-bottom: 10px;" alt="${penguin.name}の写真">`;
+                }
+            }
+            
+            var content = `
+                <h3>${penguin.name}</h3>
+                ${photoContent}
+                <p><strong>性別:</strong> ${penguin.gender}</p>
+                ${penguin.features ? `<p><strong>特徴:</strong> ${penguin.features}</p>` : ''}
+                ${penguin.personality ? `<p><strong>性格:</strong> ${penguin.personality}</p>` : ''}
+                ${penguin.attributes ? `<p><strong>属性:</strong> ${penguin.attributes}</p>` : ''}
+                ${penguin.detail_features ? `<p><strong>詳細:</strong> ${penguin.detail_features}</p>` : ''}
+            `;
+            infoPanel.innerHTML = content;
+            infoPanel.style.display = 'block';
+        }
+        
+        function hideInfo() {
+            document.getElementById('info-panel').style.display = 'none';
+        }
+        
+        function initGroupUI() {
+            if (!currentGroupData) return;
+            
+            var groupSelect = document.getElementById('group-select');
+            var groupControls = document.getElementById('group-controls');
+            
+            // 既存のオプションをクリア（最初のオプションは残す）
+            while (groupSelect.children.length > 1) {
+                groupSelect.removeChild(groupSelect.lastChild);
+            }
+            
+            // グループオプションを追加
+            currentGroupData.forEach(function(group) {
+                if (group.member_ids) { // メンバーがいるグループのみ表示
+                    var option = document.createElement('option');
+                    option.value = group.id;
+                    option.textContent = group.group_name;
+                    groupSelect.appendChild(option);
+                }
+            });
+            
+            // グループコントロールを表示
+            groupControls.style.display = 'block';
+        }
+        
+        function highlightGroup() {
+            var groupSelect = document.getElementById('group-select');
+            var selectedGroupId = groupSelect.value;
+            
+            if (!selectedGroupId || !currentGroupData || !currentGraphData) {
+                clearGroupHighlight();
+                return;
+            }
+            
+            // 選択されたグループを取得
+            var selectedGroup = currentGroupData.find(function(group) {
+                return group.id == selectedGroupId;
+            });
+            
+            if (!selectedGroup || !selectedGroup.member_ids) return;
+            
+            // メンバーIDのリストを作成
+            var memberIds = selectedGroup.member_ids.split(',').map(function(id) {
+                return parseInt(id.trim());
+            });
+            
+            console.log('元のmember_ids:', selectedGroup.member_ids);
+            console.log('変換後memberIds:', memberIds);
+            
+            console.log('ハイライト対象グループ:', selectedGroup.group_name, 'メンバー:', memberIds);
+            
+            // 全ノードを薄くして、グループメンバーを強調
+            d3.selectAll('.node circle')
+                .style('opacity', function(d) {
+                    return memberIds.includes(parseInt(d.id)) ? 1 : 0.3;
+                })
+                .style('stroke-width', function(d) {
+                    return memberIds.includes(parseInt(d.id)) ? 4 : 2;
+                })
+                .style('stroke', function(d) {
+                    return memberIds.includes(parseInt(d.id)) ? '#f39c12' : '#2c3e50';
+                });
+            
+            // ノード名も薄くする
+            d3.selectAll('.node text')
+                .style('opacity', function(d) {
+                    return memberIds.includes(parseInt(d.id)) ? 1 : 0.5;
+                })
+                .style('font-weight', function(d) {
+                    return memberIds.includes(parseInt(d.id)) ? 'bold' : 'normal';
+                });
+            
+            // リンクも薄くする（グループメンバー間のリンクは強調）
+            d3.selectAll('.link')
+                .style('opacity', function(d) {
+                    var sourceId, targetId;
+                    
+                    if (typeof d.source === 'object' && d.source.id !== undefined) {
+                        sourceId = d.source.id;
+                    } else {
+                        sourceId = currentGraphData.nodes[d.source].id;
+                    }
+                    
+                    if (typeof d.target === 'object' && d.target.id !== undefined) {
+                        targetId = d.target.id;
+                    } else {
+                        targetId = currentGraphData.nodes[d.target].id;
+                    }
+                    
+                    var sourceIsMember = memberIds.includes(parseInt(sourceId));
+                    var targetIsMember = memberIds.includes(parseInt(targetId));
+                    
+                    if (sourceIsMember && targetIsMember) {
+                        return 1; // 両方がメンバーの場合は強調
+                    } else if (sourceIsMember || targetIsMember) {
+                        return 0.6; // 片方がメンバーの場合は中間
+                    } else {
+                        return 0.1; // 両方がメンバーでない場合は薄く
+                    }
+                })
+                .style('stroke-width', function(d) {
+                    var sourceId, targetId;
+                    
+                    if (typeof d.source === 'object' && d.source.id !== undefined) {
+                        sourceId = d.source.id;
+                    } else {
+                        sourceId = currentGraphData.nodes[d.source].id;
+                    }
+                    
+                    if (typeof d.target === 'object' && d.target.id !== undefined) {
+                        targetId = d.target.id;
+                    } else {
+                        targetId = currentGraphData.nodes[d.target].id;
+                    }
+                    
+                    var sourceIsMember = memberIds.includes(parseInt(sourceId));
+                    var targetIsMember = memberIds.includes(parseInt(targetId));
+                    
+                    if (sourceIsMember && targetIsMember) {
+                        return d.type === 'family' ? 5 : 4;
+                    } else {
+                        return d.type === 'family' ? 3 : 2;
+                    }
+                });
+        }
+        
+        function clearGroupHighlight() {
+            // 全ての強調表示を解除
+            d3.selectAll('.node circle')
+                .style('opacity', 1)
+                .style('stroke-width', 2)
+                .style('stroke', '#2c3e50');
+            
+            d3.selectAll('.node text')
+                .style('opacity', 1)
+                .style('font-weight', 'bold');
+            
+            d3.selectAll('.link')
+                .style('opacity', 0.8)
+                .style('stroke-width', function(d) {
+                    return d.type === 'family' ? 3 : 2;
+                });
+            
+            // セレクトボックスもリセット
+            document.getElementById('group-select').value = '';
+        }
+        
+        function initRelationshipFilterUI() {
+            if (!allRelationshipTypes || allRelationshipTypes.length === 0) return;
+            
+            var checkboxContainer = document.getElementById('relationship-checkboxes');
+            var filterControls = document.getElementById('relationship-filter-controls');
+            
+            // 既存のチェックボックスをクリア
+            checkboxContainer.innerHTML = '';
+            
+            // 関係性の統一処理
+            var unifiedRelationshipTypes = [];
+            var addedTypes = new Set();
+            
+            allRelationshipTypes.forEach(function(relType) {
+                var displayType = relType;
+                
+                // カップルと夫婦を統一
+                if (relType === 'カップル' || relType === '夫婦') {
+                    displayType = 'カップル・夫婦';
+                }
+                
+                if (!addedTypes.has(displayType)) {
+                    unifiedRelationshipTypes.push(displayType);
+                    addedTypes.add(displayType);
+                }
+            });
+            
+            // 親子関係を追加
+            if (!addedTypes.has('親子')) {
+                unifiedRelationshipTypes.push('親子');
+            }
+            
+            // 各関係性のチェックボックスを作成
+            unifiedRelationshipTypes.forEach(function(relType) {
+                var label = document.createElement('label');
+                label.style.marginRight = '15px';
+                label.style.display = 'inline-block';
+                
+                var checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.value = relType;
+                checkbox.checked = true; // デフォルトで全てチェック
+                checkbox.setAttribute('checked', 'checked'); // 属性でも設定
+                checkbox.style.marginRight = '5px';
+                
+                label.appendChild(checkbox);
+                label.appendChild(document.createTextNode(relType));
+                checkboxContainer.appendChild(label);
+            });
+            
+            // 関係性フィルタコントロールを表示
+            filterControls.style.display = 'block';
+        }
+        
+        function applyRelationshipFilter() {
+            if (!currentGraphData) return;
+            
+            // チェックされた関係性を取得
+            var checkedTypes = [];
+            var checkboxes = document.querySelectorAll('#relationship-checkboxes input[type="checkbox"]');
+            checkboxes.forEach(function(checkbox) {
+                if (checkbox.checked) {
+                    checkedTypes.push(checkbox.value);
+                }
+            });
+            
+            // チェックボックスが全てfalseの場合は全て表示
+            if (checkedTypes.length === 0) {
+                checkedTypes = allRelationshipTypes.slice(); // 全ての関係性をコピー
+                checkedTypes.push('親子'); // 親子も追加
+            }
+            
+            
+            // 矢印の頭の表示・非表示を制御
+            Object.keys(relationshipMapping).forEach(function(relType) {
+                var mappedType = relationshipMapping[relType] || 'friend';
+                var shouldShow = false;
+                
+                // カップル・夫婦の統一チェック
+                if (relType === 'カップル' || relType === '夫婦') {
+                    shouldShow = checkedTypes.includes('カップル・夫婦');
+                } else {
+                    shouldShow = checkedTypes.includes(relType);
+                }
+                
+                var opacity = shouldShow ? 1 : 0;
+                d3.selectAll('.marker-' + mappedType).style('opacity', opacity);
+                d3.selectAll('.marker-reverse-' + mappedType).style('opacity', opacity);
+            });
+            
+            // 親子関係のマーカーも制御
+            var familyOpacity = checkedTypes.includes('親子') ? 1 : 0;
+            d3.selectAll('.marker-family').style('opacity', familyOpacity);
+            d3.selectAll('.marker-reverse-family').style('opacity', familyOpacity);
+            
+            // 関係のあるノードのみを強調表示
+            var visibleNodeIds = new Set();
+            
+            // 表示されているリンクに関連するノードIDを収集
+            currentGraphData.links.forEach(function(link) {
+                var shouldShowLink = false;
+                
+                // カップル・夫婦の統一チェック
+                if (link.typeName === 'カップル' || link.typeName === '夫婦') {
+                    shouldShowLink = checkedTypes.includes('カップル・夫婦');
+                } else {
+                    shouldShowLink = checkedTypes.includes(link.typeName);
+                }
+                
+                if (shouldShowLink) {
+                    // D3の力学シミュレーション後はsource/targetがオブジェクトになる
+                    var sourceId, targetId;
+                    
+                    if (typeof link.source === 'object' && link.source.id !== undefined) {
+                        sourceId = link.source.id;
+                    } else {
+                        sourceId = currentGraphData.nodes[link.source].id;
+                    }
+                    
+                    if (typeof link.target === 'object' && link.target.id !== undefined) {
+                        targetId = link.target.id;
+                    } else {
+                        targetId = currentGraphData.nodes[link.target].id;
+                    }
+                    
+                    visibleNodeIds.add(parseInt(sourceId));
+                    visibleNodeIds.add(parseInt(targetId));
+                }
+            });
+            
+            console.log('表示するノードID:', Array.from(visibleNodeIds));
+            
+            // ノードの表示・非表示を制御
+            d3.selectAll('.node')
+                .style('opacity', function(d) {
+                    return visibleNodeIds.has(parseInt(d.id)) ? 1 : 0.2;
+                });
+        }
+        
+        function clearRelationshipFilter() {
+            // 全てのチェックボックスをチェック
+            var checkboxes = document.querySelectorAll('#relationship-checkboxes input[type="checkbox"]');
+            checkboxes.forEach(function(checkbox) {
+                checkbox.checked = true;
+            });
+            
+            // 全てのノードを表示
+            d3.selectAll('.node').style('opacity', 1);
+            
+            // 全てのマーカーを表示
+            Object.keys(relationshipMapping).forEach(function(relType) {
+                var mappedType = relationshipMapping[relType] || 'friend';
+                d3.selectAll('.marker-' + mappedType).style('opacity', 1);
+                d3.selectAll('.marker-reverse-' + mappedType).style('opacity', 1);
+            });
+            d3.selectAll('.marker-family').style('opacity', 1);
+            d3.selectAll('.marker-reverse-family').style('opacity', 1);
+        }
+        
+        function goToAnalysis() {
+            window.location.href = 'penguin_analysis.html';
+        }
+        
+    </script>
+</head>
+
+<body>
+    <h1>🐧 すみだ水族館ペンギン相関図 🐧</h1>
+    
+    <div class="controls">
+        <button onclick="execButtonPressed()">ペンギンデータを読み込み</button>
+        <button onclick="hideInfo()">情報パネルを閉じる</button>
+        <button onclick="goToAnalysis()">📊 ネットワーク分析</button>
+        <br><br>
+        <div id="group-controls" style="display: none;">
+            <label for="group-select">グループ選択:</label>
+            <select id="group-select" onchange="highlightGroup()">
+                <option value="">全て表示</option>
+            </select>
+            <button onclick="clearGroupHighlight()">ハイライト解除</button>
+        </div>
+        <div id="relationship-filter-controls" style="display: none; margin-top: 10px;">
+            <label>関係性フィルタ:</label><br>
+            <div id="relationship-checkboxes" style="margin-top: 5px;">
+                <!-- チェックボックスがここに動的に追加されます -->
+            </div>
+            <button onclick="applyRelationshipFilter()">フィルタ適用</button>
+            <button onclick="clearRelationshipFilter()">全て表示</button>
+        </div>
+    </div>
+    
+    <div class="legend">
+        <h3>凡例</h3>
+        <div class="legend-item">
+            <div class="legend-circle male"></div>
+            <span>オス</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-circle female"></div>
+            <span>メス</span>
+        </div>
+        <hr>
+        <div class="legend-item">
+            <div class="legend-line" style="background-color: #e74c3c;"></div>
+            <span>夫婦・カップル</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-line" style="background-color: #9b59b6; background-image: repeating-linear-gradient(to right, #9b59b6 0, #9b59b6 5px, transparent 5px, transparent 10px);"></div>
+            <span>不仲</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-line" style="background-color: #e67e22; background-image: repeating-linear-gradient(to right, #e67e22 0, #e67e22 5px, transparent 5px, transparent 10px);"></div>
+            <span>破局</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-line" style="background-color: #f39c12; background-image: repeating-linear-gradient(to right, #f39c12 0, #f39c12 10px, transparent 10px, transparent 15px);"></div>
+            <span>友達以上？</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-line" style="background-color: #2ecc71;"></div>
+            <span>友達</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-line" style="background-color: #27ae60; background-image: repeating-linear-gradient(to right, #27ae60 0, #27ae60 10px, transparent 10px, transparent 12px);"></div>
+            <span>親子関係</span>
+        </div>
+        <hr>
+        <div class="legend-item">
+            <span>→ 一方向関係</span>
+        </div>
+        <div class="legend-item">
+            <span>↔ 相互関係</span>
+        </div>
+    </div>
+    
+    <div class="info-panel" id="info-panel">
+        <!-- ペンギン情報がここに表示される -->
+    </div>
+    
+    <div class="loading" id="loading">
+        データを読み込み中...
+    </div>
+    
+    <hr>
+    <div id="graph"></div>
+</body>
+
+</html>

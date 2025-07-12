@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>ペンギンネットワーク分析</title>
+    <style>
+        body {
+            font-family: 'Hiragino Kaku Gothic Pro', 'ヒラギノ角ゴ Pro W3', 'Meiryo', sans-serif;
+            margin: 20px;
+            background-color: #f0f8ff;
+            color: #2c3e50;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 30px;
+        }
+        
+        .controls {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            margin: 0 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        .analysis-section {
+            background-color: white;
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            border-left: 5px solid #3498db;
+        }
+        
+        .analysis-section h2 {
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        
+        .analysis-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .analysis-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .penguin-rank {
+            background-color: #ecf0f1;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        
+        .penguin-rank h3 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+        }
+        
+        .rank-item {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+            padding: 8px;
+            background-color: white;
+            border-radius: 5px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .rank-item .rank-number {
+            font-weight: bold;
+            color: #e74c3c;
+            margin-right: 10px;
+            width: 25px;
+        }
+        
+        .rank-item .penguin-name {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-right: 10px;
+        }
+        
+        .rank-item .score {
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #7f8c8d;
+            font-size: 18px;
+        }
+        
+        .error {
+            text-align: center;
+            padding: 50px;
+            color: #e74c3c;
+            font-size: 18px;
+        }
+        
+        .back-button {
+            background-color: #95a5a6;
+            margin-bottom: 20px;
+        }
+        
+        .back-button:hover {
+            background-color: #7f8c8d;
+        }
+        
+        .analysis-description {
+            background-color: #ebf3fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .analysis-description h3 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+        }
+        
+        .analysis-description p {
+            margin: 5px 0;
+            line-height: 1.6;
+        }
+        
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #3498db;
+            margin: 10px 0;
+        }
+        
+        .gender-male {
+            color: #3498db;
+        }
+        
+        .gender-female {
+            color: #e91e63;
+        }
+    </style>
+    <script type="text/javascript" src="jquery.min.js"></script>
+    <script type="text/javascript" src="osql.js"></script>
+</head>
+<body>
+    <h1>🐧 ペンギンネットワーク分析 🐧</h1>
+    
+    <div class="controls">
+        <button class="back-button" onclick="goBack()">← ネットワーク図に戻る</button>
+        <button onclick="loadAnalysis()">分析を実行</button>
+    </div>
+    
+    <div class="loading" id="loading" style="display: none;">
+        分析を実行中...
+    </div>
+    
+    <div class="error" id="error" style="display: none;">
+        分析に失敗しました。データベースに接続できません。
+    </div>
+    
+    <div id="analysis-results" style="display: none;">
+        
+        <div class="analysis-section">
+            <h2>📊 次数中心性分析</h2>
+            <div class="analysis-description">
+                <h3>次数中心性とは？</h3>
+                <p>直接的な関係の数を表す指標です。友達や家族など、直接つながりのある相手の数が多いほど値が高くなります。</p>
+            </div>
+            <div class="analysis-grid">
+                <div class="penguin-rank">
+                    <h3>🥇 次数中心性ランキング TOP 10</h3>
+                    <div id="degree-centrality-ranking"></div>
+                </div>
+                <div class="penguin-rank">
+                    <h3>📈 次数中心性統計</h3>
+                    <div id="degree-centrality-stats"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="analysis-section">
+            <h2>🌉 媒介中心性分析</h2>
+            <div class="analysis-description">
+                <h3>媒介中心性とは？</h3>
+                <p>他のペンギン同士をつなぐ「橋渡し」の役割を果たす度合いを表す指標です。値が高いほど、コミュニティ内での仲介役として重要な位置にいます。</p>
+            </div>
+            <div class="analysis-grid">
+                <div class="penguin-rank">
+                    <h3>🥇 媒介中心性ランキング TOP 10</h3>
+                    <div id="betweenness-centrality-ranking"></div>
+                </div>
+                <div class="penguin-rank">
+                    <h3>📈 媒介中心性統計</h3>
+                    <div id="betweenness-centrality-stats"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="analysis-section">
+            <h2>🎯 近接中心性分析</h2>
+            <div class="analysis-description">
+                <h3>近接中心性とは？</h3>
+                <p>他の全てのペンギンに対して、どれだけ近い距離（関係の段数）でアクセスできるかを表す指標です。値が高いほど、コミュニティ全体に効率的に情報を伝えられます。</p>
+            </div>
+            <div class="analysis-grid">
+                <div class="penguin-rank">
+                    <h3>🥇 近接中心性ランキング TOP 10</h3>
+                    <div id="closeness-centrality-ranking"></div>
+                </div>
+                <div class="penguin-rank">
+                    <h3>📈 近接中心性統計</h3>
+                    <div id="closeness-centrality-stats"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="analysis-section">
+            <h2>👥 関係性分析</h2>
+            <div class="analysis-grid">
+                <div class="penguin-rank">
+                    <h3>🤝 最も友達が多いペンギン TOP 10</h3>
+                    <div id="most-friends-ranking"></div>
+                </div>
+                <div class="penguin-rank">
+                    <h3>💔 最も不仲が多いペンギン TOP 10</h3>
+                    <div id="most-conflicts-ranking"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="analysis-section">
+            <h2>📈 ネットワーク全体統計</h2>
+            <div class="analysis-grid">
+                <div class="penguin-rank">
+                    <h3>🔢 基本統計</h3>
+                    <div id="network-stats"></div>
+                </div>
+                <div class="penguin-rank">
+                    <h3>🔗 関係性統計</h3>
+                    <div id="relationship-stats"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        osql.requireLogin();
+        
+        let networkData = null;
+        let analysisResults = null;
+        
+        function goBack() {
+            window.location.href = 'penguin_network_simple.html';
+        }
+        
+        async function loadAnalysis() {
+            try {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('error').style.display = 'none';
+                document.getElementById('analysis-results').style.display = 'none';
+                
+                // データベースからデータを取得
+                await loadNetworkData();
+                
+                // 分析を実行
+                performAnalysis();
+                
+                // 結果を表示
+                displayResults();
+                
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('analysis-results').style.display = 'block';
+                
+            } catch (error) {
+                console.error('分析エラー:', error);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('error').style.display = 'block';
+            }
+        }
+        
+        async function loadNetworkData() {
+            // ペンギンデータを取得
+            const penguinSql = `
+                SELECT p.id, p.name, p.gender, p.photo, p.features, p.personality, p.detail_features
+                FROM penguins p
+                ORDER BY p.id
+            `;
+            const penguins = await osql.connect(penguinSql);
+            
+            // 関係データを取得
+            const relationshipSql = `
+                SELECT pr.from_id, pr.to_id, rt.type_name, pr.notes
+                FROM penguin_relationships pr
+                JOIN relationship_types rt ON pr.relationship_type_id = rt.id
+            `;
+            const relationships = await osql.connect(relationshipSql);
+            
+            // 家族データを取得
+            const familySql = `
+                SELECT pf.child_id, pf.parent1_id, pf.parent2_id
+                FROM penguin_family pf
+            `;
+            const families = await osql.connect(familySql);
+            
+            // ネットワークデータを構築
+            networkData = {
+                penguins: penguins,
+                relationships: relationships,
+                families: families
+            };
+            
+            console.log('データ読み込み完了:', networkData);
+        }
+        
+        function performAnalysis() {
+            const penguins = networkData.penguins;
+            const relationships = networkData.relationships;
+            const families = networkData.families;
+            
+            // 隣接リストの作成
+            const adjacencyList = {};
+            penguins.forEach(penguin => {
+                adjacencyList[penguin.id] = [];
+            });
+            
+            // 関係を隣接リストに追加（重みなし）
+            relationships.forEach(rel => {
+                if (adjacencyList[rel.from_id] && adjacencyList[rel.to_id]) {
+                    adjacencyList[rel.from_id].push({
+                        id: rel.to_id,
+                        type: rel.type_name,
+                        weight: 1
+                    });
+                    adjacencyList[rel.to_id].push({
+                        id: rel.from_id,
+                        type: rel.type_name,
+                        weight: 1
+                    });
+                }
+            });
+            
+            // 家族関係を隣接リストに追加
+            families.forEach(family => {
+                if (adjacencyList[family.child_id] && adjacencyList[family.parent1_id]) {
+                    adjacencyList[family.child_id].push({
+                        id: family.parent1_id,
+                        type: '親子',
+                        weight: 1
+                    });
+                    adjacencyList[family.parent1_id].push({
+                        id: family.child_id,
+                        type: '親子',
+                        weight: 1
+                    });
+                }
+                if (family.parent2_id && adjacencyList[family.child_id] && adjacencyList[family.parent2_id]) {
+                    adjacencyList[family.child_id].push({
+                        id: family.parent2_id,
+                        type: '親子',
+                        weight: 1
+                    });
+                    adjacencyList[family.parent2_id].push({
+                        id: family.child_id,
+                        type: '親子',
+                        weight: 1
+                    });
+                }
+            });
+            
+            // 重複を削除
+            Object.keys(adjacencyList).forEach(id => {
+                const seen = new Set();
+                adjacencyList[id] = adjacencyList[id].filter(neighbor => {
+                    const key = `${neighbor.id}-${neighbor.type}`;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                });
+            });
+            
+            // 分析結果を格納
+            analysisResults = {
+                degreeCentrality: calculateDegreeCentrality(adjacencyList),
+                betweennessCentrality: calculateBetweennessCentrality(adjacencyList),
+                closenessCentrality: calculateClosenessCentrality(adjacencyList),
+                friendsCount: calculateFriendsCount(relationships),
+                conflictsCount: calculateConflictsCount(relationships),
+                networkStats: calculateNetworkStats(penguins, relationships, families),
+                relationshipStats: calculateRelationshipStats(relationships)
+            };
+            
+            console.log('分析完了:', analysisResults);
+        }
+        
+        function calculateDegreeCentrality(adjacencyList) {
+            const results = {};
+            Object.keys(adjacencyList).forEach(id => {
+                results[id] = adjacencyList[id].length;
+            });
+            return results;
+        }
+        
+        function calculateBetweennessCentrality(adjacencyList) {
+            const results = {};
+            const nodes = Object.keys(adjacencyList);
+            
+            // 全ノードの媒介中心性を0で初期化
+            nodes.forEach(node => {
+                results[node] = 0;
+            });
+            
+            // 各ノードペアに対して最短経路を計算
+            nodes.forEach(source => {
+                nodes.forEach(target => {
+                    if (source !== target) {
+                        const shortestPaths = findAllShortestPaths(adjacencyList, source, target);
+                        if (shortestPaths.length > 0) {
+                            // 各最短経路について、中間ノードに対して媒介中心性を加算
+                            shortestPaths.forEach(path => {
+                                for (let i = 1; i < path.length - 1; i++) {
+                                    results[path[i]] += 1.0 / shortestPaths.length;
+                                }
+                            });
+                        }
+                    }
+                });
+            });
+            
+            // 正規化: 全ノードペア数で割る
+            const totalPairs = nodes.length * (nodes.length - 1);
+            nodes.forEach(node => {
+                results[node] = results[node] / totalPairs;
+            });
+            
+            return results;
+        }
+        
+        function findAllShortestPaths(adjacencyList, source, target) {
+            // BFSを使用して最短経路を探索
+            const distances = {};
+            const predecessors = {};
+            const queue = [source];
+            
+            distances[source] = 0;
+            predecessors[source] = [];
+            
+            while (queue.length > 0) {
+                const current = queue.shift();
+                const currentDistance = distances[current];
+                
+                const neighbors = adjacencyList[current] || [];
+                neighbors.forEach(neighbor => {
+                    const neighborId = neighbor.id;
+                    const newDistance = currentDistance + 1;
+                    
+                    if (!(neighborId in distances)) {
+                        // 初回訪問
+                        distances[neighborId] = newDistance;
+                        predecessors[neighborId] = [current];
+                        queue.push(neighborId);
+                    } else if (distances[neighborId] === newDistance) {
+                        // 同じ距離の別の経路
+                        predecessors[neighborId].push(current);
+                    }
+                });
+            }
+            
+            // targetに到達できない場合は空配列を返す
+            if (!(target in distances)) {
+                return [];
+            }
+            
+            // 最短経路を再構築
+            const paths = [];
+            
+            function buildPaths(node, currentPath) {
+                if (node === source) {
+                    paths.push([source, ...currentPath.reverse()]);
+                    return;
+                }
+                
+                const preds = predecessors[node] || [];
+                preds.forEach(pred => {
+                    buildPaths(pred, [node, ...currentPath]);
+                });
+            }
+            
+            buildPaths(target, []);
+            
+            return paths;
+        }
+        
+        function calculateClosenessCentrality(adjacencyList) {
+            const results = {};
+            const nodes = Object.keys(adjacencyList);
+            
+            nodes.forEach(node => {
+                const distances = calculateShortestDistances(adjacencyList, node);
+                
+                // 到達可能なノードのみを考慮
+                const reachableDistances = Object.values(distances).filter(dist => dist > 0);
+                
+                if (reachableDistances.length > 0) {
+                    const totalDistance = reachableDistances.reduce((sum, dist) => sum + dist, 0);
+                    // 正規化: 到達可能なノード数 / 総距離
+                    results[node] = reachableDistances.length / totalDistance;
+                } else {
+                    results[node] = 0;
+                }
+            });
+            
+            return results;
+        }
+        
+        function calculateShortestDistances(adjacencyList, source) {
+            const distances = {};
+            const visited = new Set();
+            const queue = [{ node: source, distance: 0 }];
+            
+            distances[source] = 0;
+            
+            while (queue.length > 0) {
+                queue.sort((a, b) => a.distance - b.distance);
+                const { node, distance } = queue.shift();
+                
+                if (visited.has(node)) continue;
+                visited.add(node);
+                
+                const neighbors = adjacencyList[node] || [];
+                neighbors.forEach(neighbor => {
+                    if (!visited.has(neighbor.id)) {
+                        const newDistance = distance + 1;
+                        if (distances[neighbor.id] === undefined || newDistance < distances[neighbor.id]) {
+                            distances[neighbor.id] = newDistance;
+                            queue.push({ node: neighbor.id, distance: newDistance });
+                        }
+                    }
+                });
+            }
+            
+            return distances;
+        }
+        
+        function calculateFriendsCount(relationships) {
+            const friendsCounts = {};
+            
+            relationships.forEach(rel => {
+                if (rel.type_name === '友達') {
+                    friendsCounts[rel.from_id] = (friendsCounts[rel.from_id] || 0) + 1;
+                    friendsCounts[rel.to_id] = (friendsCounts[rel.to_id] || 0) + 1;
+                }
+            });
+            
+            return friendsCounts;
+        }
+        
+        function calculateConflictsCount(relationships) {
+            const conflictsCounts = {};
+            
+            relationships.forEach(rel => {
+                if (rel.type_name === '不仲') {
+                    conflictsCounts[rel.from_id] = (conflictsCounts[rel.from_id] || 0) + 1;
+                    conflictsCounts[rel.to_id] = (conflictsCounts[rel.to_id] || 0) + 1;
+                }
+            });
+            
+            return conflictsCounts;
+        }
+        
+        function calculateNetworkStats(penguins, relationships, families) {
+            const totalNodes = penguins.length;
+            const totalEdges = relationships.length + families.length;
+            const maleCount = penguins.filter(p => p.gender === 'オス' || p.gender === '男').length;
+            const femaleCount = penguins.filter(p => p.gender === 'メス' || p.gender === '女').length;
+            
+            return {
+                totalNodes,
+                totalEdges,
+                maleCount,
+                femaleCount,
+                density: (totalEdges * 2) / (totalNodes * (totalNodes - 1))
+            };
+        }
+        
+        function calculateRelationshipStats(relationships) {
+            const typeCounts = {};
+            
+            relationships.forEach(rel => {
+                typeCounts[rel.type_name] = (typeCounts[rel.type_name] || 0) + 1;
+            });
+            
+            return typeCounts;
+        }
+        
+        function displayResults() {
+            const penguins = networkData.penguins;
+            const penguinMap = {};
+            penguins.forEach(p => {
+                penguinMap[p.id] = p;
+            });
+            
+            // 次数中心性ランキング
+            displayRanking('degree-centrality-ranking', analysisResults.degreeCentrality, penguinMap, '接続数');
+            displayCentralityStats('degree-centrality-stats', analysisResults.degreeCentrality, '次数中心性');
+            
+            // 媒介中心性ランキング
+            displayRanking('betweenness-centrality-ranking', analysisResults.betweennessCentrality, penguinMap, '媒介度');
+            displayCentralityStats('betweenness-centrality-stats', analysisResults.betweennessCentrality, '媒介中心性');
+            
+            // 近接中心性ランキング
+            displayRanking('closeness-centrality-ranking', analysisResults.closenessCentrality, penguinMap, '近接度');
+            displayCentralityStats('closeness-centrality-stats', analysisResults.closenessCentrality, '近接中心性');
+            
+            // 友達ランキング
+            displayRanking('most-friends-ranking', analysisResults.friendsCount, penguinMap, '友達数');
+            
+            // 不仲ランキング
+            displayRanking('most-conflicts-ranking', analysisResults.conflictsCount, penguinMap, '不仲数');
+            
+            // ネットワーク統計
+            displayNetworkStats();
+            
+            // 関係性統計
+            displayRelationshipStats();
+        }
+        
+        function displayRanking(elementId, scores, penguinMap, unit) {
+            const element = document.getElementById(elementId);
+            const sortedScores = Object.entries(scores)
+                .sort(([,a], [,b]) => b - a)
+                .slice(0, 10);
+            
+            if (sortedScores.length === 0) {
+                element.innerHTML = '<p>データがありません</p>';
+                return;
+            }
+            
+            let html = '';
+            sortedScores.forEach(([id, score], index) => {
+                const penguin = penguinMap[id];
+                if (penguin) {
+                    const genderClass = (penguin.gender === 'オス' || penguin.gender === '男') ? 'gender-male' : 'gender-female';
+                    const scoreValue = unit === '接続数' ? score : score.toFixed(3);
+                    html += `
+                        <div class="rank-item" onclick="showPenguinDetails('${id}', '${penguin.name}')">
+                            <span class="rank-number">${index + 1}</span>
+                            <span class="penguin-name ${genderClass}">${penguin.name}</span>
+                            <span class="score">${unit}: ${scoreValue}</span>
+                        </div>
+                    `;
+                }
+            });
+            
+            element.innerHTML = html;
+        }
+        
+        function displayCentralityStats(elementId, scores, metricName) {
+            const element = document.getElementById(elementId);
+            const values = Object.values(scores);
+            
+            if (values.length === 0) {
+                element.innerHTML = '<p>データがありません</p>';
+                return;
+            }
+            
+            const max = Math.max(...values);
+            const min = Math.min(...values);
+            const avg = values.reduce((sum, val) => sum + val, 0) / values.length;
+            
+            element.innerHTML = `
+                <div class="metric-value">最大値: ${max.toFixed(2)}</div>
+                <div class="metric-value">最小値: ${min.toFixed(2)}</div>
+                <div class="metric-value">平均値: ${avg.toFixed(2)}</div>
+                <div class="metric-value">標準偏差: ${calculateStandardDeviation(values).toFixed(2)}</div>
+            `;
+        }
+        
+        function calculateStandardDeviation(values) {
+            const avg = values.reduce((sum, val) => sum + val, 0) / values.length;
+            const squaredDiffs = values.map(val => Math.pow(val - avg, 2));
+            const avgSquaredDiff = squaredDiffs.reduce((sum, val) => sum + val, 0) / values.length;
+            return Math.sqrt(avgSquaredDiff);
+        }
+        
+        function displayNetworkStats() {
+            const stats = analysisResults.networkStats;
+            const element = document.getElementById('network-stats');
+            
+            element.innerHTML = `
+                <div class="metric-value">総ペンギン数: ${stats.totalNodes}</div>
+                <div class="metric-value">総関係数: ${stats.totalEdges}</div>
+                <div class="metric-value">オス: ${stats.maleCount}</div>
+                <div class="metric-value">メス: ${stats.femaleCount}</div>
+                <div class="metric-value">密度: ${(stats.density * 100).toFixed(2)}%</div>
+            `;
+        }
+        
+        function displayRelationshipStats() {
+            const stats = analysisResults.relationshipStats;
+            const element = document.getElementById('relationship-stats');
+            
+            let html = '';
+            Object.entries(stats).forEach(([type, count]) => {
+                html += `<div class="metric-value">${type}: ${count}</div>`;
+            });
+            
+            element.innerHTML = html;
+        }
+        
+        function showPenguinDetails(penguinId, penguinName) {
+            // 選択されたペンギンの詳細な関係を表示
+            if (!networkData) {
+                alert('データが読み込まれていません');
+                return;
+            }
+            
+            const relationships = networkData.relationships;
+            const families = networkData.families;
+            const penguin = networkData.penguins.find(p => p.id == penguinId);
+            
+            if (!penguin) {
+                alert('ペンギンが見つかりません');
+                return;
+            }
+            
+            // 関係の詳細を収集
+            const relationshipDetails = [];
+            
+            // 通常の関係
+            relationships.forEach(rel => {
+                if (rel.from_id == penguinId) {
+                    const partner = networkData.penguins.find(p => p.id == rel.to_id);
+                    if (partner) {
+                        relationshipDetails.push(`${rel.type_name}: ${partner.name}`);
+                    }
+                }
+                if (rel.to_id == penguinId) {
+                    const partner = networkData.penguins.find(p => p.id == rel.from_id);
+                    if (partner) {
+                        relationshipDetails.push(`${rel.type_name}: ${partner.name}`);
+                    }
+                }
+            });
+            
+            // 家族関係
+            families.forEach(family => {
+                if (family.child_id == penguinId) {
+                    const parent1 = networkData.penguins.find(p => p.id == family.parent1_id);
+                    if (parent1) {
+                        relationshipDetails.push(`親子関係: ${parent1.name}（親）`);
+                    }
+                    if (family.parent2_id) {
+                        const parent2 = networkData.penguins.find(p => p.id == family.parent2_id);
+                        if (parent2) {
+                            relationshipDetails.push(`親子関係: ${parent2.name}（親）`);
+                        }
+                    }
+                }
+                if (family.parent1_id == penguinId || family.parent2_id == penguinId) {
+                    const child = networkData.penguins.find(p => p.id == family.child_id);
+                    if (child) {
+                        relationshipDetails.push(`親子関係: ${child.name}（子）`);
+                    }
+                }
+            });
+            
+            // 重複を除去
+            const uniqueRelationships = [...new Set(relationshipDetails)];
+            
+            const message = `${penguinName}の関係詳細（合計: ${uniqueRelationships.length}）:\n\n${uniqueRelationships.join('\n')}`;
+            alert(message);
+        }
+        
+        // ページ読み込み時に自動実行
+        window.onload = function() {
+            // URLパラメータで自動実行フラグがあれば実行
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('auto') === 'true') {
+                loadAnalysis();
+            }
+        };
+    </script>
+</body>
+</html>
